@@ -11,11 +11,11 @@ import time
 import subprocess
 
 def scrapBTC():
-    bash_script = "/home/aki/ProjetLinux/scrap.sh"
+    bash_script = "/home/aki/LinuxProject/scrap.sh"
     return subprocess.check_output(['bash', '-c', bash_script]).decode('utf-8')
 
 def append_to_csv(result):
-    with open("/home/aki/ProjetLinux/bitcoin_data.csv", 'a', newline = '') as csvfile:
+    with open("/home/aki/LinuxProject/bitcoin_data.csv", 'a', newline = '') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(result)
 

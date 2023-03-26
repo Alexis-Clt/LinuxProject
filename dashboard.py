@@ -4,7 +4,7 @@ from dash import dcc
 import subprocess
 
 # Define the Bash script to run
-bash_script = "/home/aki/ProjetLinux/scrap.sh"
+bash_script = "/home/aki/LinuxProject/scrap.sh"
 
 # Run the Bash script and capture its output
 result = subprocess.check_output(['bash', '-c', bash_script]).decode('utf-8')
