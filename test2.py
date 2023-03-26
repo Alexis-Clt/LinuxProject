@@ -5,22 +5,23 @@ from dash import dash_table
 import pandas as pd
 import numpy as np
 import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import csv
 import time
 import subprocess
 
-def scrapBTC():
-    bash_script = "/home/aki/LinuxProject/scrap.sh"
-    return subprocess.check_output(['bash', '-c', bash_script]).decode('utf-8')
+def load_data():
+    data = pd.read_csv("data.csv")
+    data["timestamp"] = pd.to_datetime(data["timestamp"])
+    return data
 
 def append_to_csv(result):
-    with open("/home/aki/LinuxProject/bitcoin_data.csv", 'a', newline = '') as csvfile:
+    with open("/home/aki/LinuxProject/data.csv", 'a', newline = '') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(result)
 
 def update_graph():
-    df = pd.read_csv('bitcoin_data.csv', names=['Price'])
+    df = pd.read_csv('data.csv', names=['Price'])
     timestamps = pd.date_range(start='2023-01-01', periods=len(df), freq='D')
     df['Timestamp'] = timestamps
 
