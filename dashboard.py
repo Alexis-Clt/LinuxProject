@@ -1,90 +1,103 @@
 import dash
-from dash import dcc
-from dash import html
-from dash.dependencies import Output, Input
-import subprocess
-import re
-import csv
-from datetime import datetime
+import dash_core_components as dcc
+import dash_html_components as html
+import dash_table
+import pandas as pd
+import plotly.graph_objs as go
+from dash.dependencies import Input, Output, State
+import os
+import time
+
+def load_data():
+    data = pd.read_csv("data.csv")
+    data["timestamp"] = pd.to_datetime(data["timestamp"])
+    return data
+
+def daily_report(data):
+    data['date'] = data['timestamp'].dt.date
+    daily_data = data.groupby('date').agg(
+        open_rate=('rate', 'first'),
+        close_rate=('rate', 'last'),
+        high_rate=('rate', 'max'),
+        low_rate=('rate', 'min')
+    )
+    daily_data['percentage_change'] = (daily_data['close_rate'] - daily_data['open_rate']) / daily_data['open_rate'] * 100
+    return daily_data
 
 app = dash.Dash(__name__)
 
+data = load_data()
+
 app.layout = html.Div(
-    [
-        html.H1("Bitcoin Price Dashboard", style={"textAlign": "center", "color": "#2c3e50"}),
-        html.Div(id="live-update-text", style={"textAlign": "center", "color": "#2980b9", "fontSize": 24}),
+    children=[
+        html.H1(children="Taux de change EUR/USD"),
+        dcc.DatePickerRange(
+            id='date-picker',
+            min_date_allowed=data['timestamp'].min().date(),
+            max_date_allowed=data['timestamp'].max().date(),
+            start_date=data['timestamp'].min().date(),
+            end_date=data['timestamp'].max().date()
+        ),
         dcc.Graph(id="live-update-graph"),
-        html.Div(id="daily-report", style={"textAlign": "center"}),
         dcc.Interval(
             id="interval-component",
-            interval= 10*1000,  # update every 30 seconds
-            n_intervals=0
-        )
-    ],
-    style={"backgroundColor": "#34495e", "padding": "20px", "borderRadius": "10px"}
+            interval=60 * 1000,  # Mise à jour toutes les minutes
+            n_intervals=0,
+        ),
+        html.H2(children="Rapport quotidien"),
+        dash_table.DataTable(
+            id="daily-report-table",
+            columns=[
+                {"name": "Date", "id": "date"},
+                {"name": "Ouverture", "id": "open_rate"},
+                {"name": "Clôture", "id": "close_rate"},
+                {"name": "Haut", "id": "high_rate"},
+                {"name": "Bas", "id": "low_rate"},
+                {"name": "Variation en %", "id": "percentage_change"},
+            ],
+            style_cell={"textAlign": "center"},
+            style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        ),
+    ]
 )
-
-x_values = []
-y_values = []
-daily_metrics = {}
 
 @app.callback(
-    [Output("live-update-text", "children"), Output("live-update-graph", "figure"), Output("daily-report", "children")],
-    [Input("interval-component", "n_intervals")]
+    Output("live-update-graph", "figure"),
+    Input("interval-component", "n_intervals"),
+    Input('date-picker', 'start_date'),
+    Input('date-picker', 'end_date')
 )
-def update_dashboard(n):
-    global daily_metrics
 
-    # Call the scraper script and get the output
-    output = subprocess.check_output("./scraper.sh", shell=True)
+def update_dashboard(n, start_date, end_date):
+    data = load_data()
+    data = data[(data['timestamp'].dt.date >= pd.to_datetime(start_date)) & (data['timestamp'].dt.date <= pd.to_datetime(end_date))]
+    
+    trace = go.Scatter(x=data["timestamp"], y=data["rate"], mode="lines+markers", name="Taux de change")
 
-    # Parse the output using regex to get the price
-    price = re.search(r"\$([0-9.]+)", output.decode("utf-8")).group(1)
+    data["moving_average"] = data["rate"].rolling(window=5).mean()
+    moving_average_trace = go.Scatter(x=data["timestamp"], y=data["moving_average"], mode="lines", name="Moyenne mobile")
 
-    # Save the price to a CSV file
-    with open("bitcoin_prices.csv", "a", newline="") as csvfile:
-        csv_writer = csv.writer(csvfile)
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        csv_writer.writerow([timestamp, price])
+    data["volatility"] = data["rate"].rolling(window=5).std()
+    volatility_trace_upper = go.Scatter(x=data["timestamp"], y=data["moving_average"] + data["volatility"], mode="lines", name="Volatilité supérieure", line={"dash": "dash"})
+    volatility_trace_lower = go.Scatter(x=data["timestamp"], y=data["moving_average"] - data["volatility"], mode="lines", name="Volatilité inférieure", line={"dash": "dash"})
 
-    # Update the text on the dashboard
-    text = f"Bitcoin Price: ${price}"
-
-    # Update the x and y values
-    x_values.append(timestamp)
-    y_values.append(float(price))
-
-    graph_data = {
-        "x": x_values,
-        "y": y_values,
-        "type": "line",
-        "line": {"color": "#e74c3c", "width": 2.5},
-        "name": "Price",
-        "marker": {"color": "#e74c3c", "size": 8}
+    return {
+        "data": [trace, moving_average_trace, volatility_trace_upper, volatility_trace_lower],
+        "layout": go.Layout(
+            xaxis={"title": "Date et heure"},
+            yaxis={"title": "Taux de change"},
+            showlegend=True,
+            margin=dict(l=40, r=0, t=40, b=30),
+        ),
     }
-
-    # Update the daily report once every 24 hours (i.e., every 288 intervals, where each interval is 5 minutes)
-    if n % 288 == 0:
-        daily_metrics = {
-            "volatility": 0.02,
-            "open": 10000,
-            "close": 11000,
-            "evolution": 0.1
-        }
-    # Create a table to display the daily metrics
-    table_rows = [
-        html.Tr([html.Td(metric.capitalize(), style={"padding": "5px"}), html.Td(str(value), style={"padding": "5px"})]) for metric, value in daily_metrics.items()
-    ]
-    daily_table = html.Div(
-        [
-            html.H2("Daily Report", style={"color": "#ecf0f1"}),
-            html.Table(table_rows, style={"margin-top": "20px", "margin-left": "auto", "margin-right": "auto", "border": "1px solid #7f8c8d", "border-collapse": "collapse", "width": "50%", "color": "#ecf0f1"})
-        ],
-        style={"padding": "20px", "backgroundColor": "#2c3e50", "borderRadius": "10px", "boxShadow": "0 4px 8px 0 rgba(0, 0, 0, 0.2)"}
-    )
-
-    # Return the updated text, graph, and daily metrics table
-    return text, {"data": [graph_data], "layout": {"title": "Bitcoin Price", "plot_bgcolor": "#34495e", "paper_bgcolor": "#34495e", "font": {"color": "#ecf0f1"}, "xaxis": {"gridcolor": "#7f8c8d"}, "yaxis": {"gridcolor": "#7f8c8d"}}}, daily_table
+@app.callback(
+    Output("daily-report-table", "data"),
+    Input("interval-component", "n_intervals"),
+)
+def update_daily_report(n):
+    data = load_data()
+    daily_data = daily_report(data)
+    return daily_data.reset_index().to_dict("records")
 
 if __name__ == "__main__":
     app.run_server(debug=True)
